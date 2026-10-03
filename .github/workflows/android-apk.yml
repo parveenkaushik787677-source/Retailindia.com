@@ -1,71 +1,97 @@
-
 name: Build RETAIL INDIA APK
 
-"on":
-  workflow_dispatch:
+on:
+workflow_dispatch:
+push:
+branches:
+- main
+
+permissions:
+contents: read
 
 jobs:
-  build:
-    runs-on: ubuntu-latest
+build:
+name: Build Android APK
+runs-on: ubuntu-24.04
 
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+steps:
+  - name: Checkout repository
+    uses: actions/checkout@v4
 
-      - name: Setup Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20
+  - name: Setup Node.js
+    uses: actions/setup-node@v4
+    with:
+      node-version: 22
+      cache: npm
+      cache-dependency-path: package-lock.json
 
-      - name: Setup Java
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: '21'
+  - name: Setup Java
+    uses: actions/setup-java@v4
+    with:
+      distribution: temurin
+      java-version: '17'
 
-      - 
-      - name: Install Android SDK tools
-        run: |
-          mkdir -p "$ANDROID_HOME/cmdline-tools"
-          curl -fsSL https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip -o /tmp/android-tools.zip
-          mkdir -p /tmp/android-tools
-          unzip -q /tmp/android-tools.zip -d /tmp/android-tools
-          rm -rf "$ANDROID_HOME/cmdline-tools/latest"
-          mkdir -p "$ANDROID_HOME/cmdline-tools/latest"
-          mv /tmp/android-tools/cmdline-tools/* "$ANDROID_HOME/cmdline-tools/latest/"
-          echo "$ANDROID_HOME/cmdline-tools/latest/bin" >> "$GITHUB_PATH"
-          yes | sdkmanager --sdk_root="$ANDROID_HOME" --licenses
-          sdkmanager --sdk_root="$ANDROID_HOME" "platform-tools" "platforms;android-35" "build-tools;35.0.0"
+  - name: Locate project
+    shell: bash
+    run: |
+      set -e
+      if [ -f package.json ]; then
+        PROJECT_DIR="$GITHUB_WORKSPACE"
+      else
+        ZIP_FILE=$(find . -maxdepth 3 -type f -iname '*.zip' | head -n 1)
+        if [ -z "$ZIP_FILE" ]; then
+          echo "Project ZIP not found. Upload the project files or ZIP."
+          exit 1
+        fi
+        mkdir -p extracted
+        unzip -q "$ZIP_FILE" -d extracted
+        PROJECT_DIR=$(dirname "$(find extracted -name package.json -type f | head -n 1)")
+      fi
 
+      if [ -z "$PROJECT_DIR" ] || [ ! -f "$PROJECT_DIR/package.json" ]; then
+        echo "package.json not found."
+        exit 1
+      fi
 
-      - name: Extract project
-        run: unzip -q RETAIL-INDIA-GITHUB-UPLOAD.zip
+      echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
+      echo "Project found: $PROJECT_DIR"
 
-      - name: Install dependencies
-        working-directory: retail-india-production
-        run: npm install
+  - name: Install dependencies
+    run: npm install
+    working-directory: ${{ env.PROJECT_DIR }}
 
-      - name: Build web app
-        working-directory: retail-india-production
-        run: npm run build
+  - name: Build web app
+    run: npm run build
+    working-directory: ${{ env.PROJECT_DIR }}
 
-      - name: Add Android
-        working-directory: retail-india-production
-        run: npx cap add android
+  - name: Configure Android SDK
+    run: |
+      echo "ANDROID_HOME=$ANDROID_SDK_ROOT" >> "$GITHUB_ENV"
+      yes | sdkmanager --licenses || true
+      sdkmanager "platform-tools" "platforms;android-35" "build-tools;35.0.0"
 
-      - name: Sync Android
-        working-directory: retail-india-production
-        run: npx cap sync android
+  - name: Add Android platform
+    run: |
+      if [ ! -d android ]; then
+        npx cap add android
+      fi
+    working-directory: ${{ env.PROJECT_DIR }}
 
-      - name: Build APK
-        working-directory: retail-india-production/android
-        run: |
-          chmod +x gradlew
-          ./gradlew assembleDebug
+  - name: Sync Android
+    run: npx cap sync android
+    working-directory: ${{ env.PROJECT_DIR }}
 
-      - name: Upload APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: RETAIL-INDIA-APK
-          path: retail-india-production/android/app/build/outputs/apk/debug/app-debug.apk
+  - name: Build APK
+    run: |
+      cd android
+      chmod +x gradlew
+      ./gradlew assembleDebug
 
+    working-directory: ${{ env.PROJECT_DIR }}
+
+  - name: Upload APK
+    uses: actions/upload-artifact@v4
+    with:
+      name: RETAIL-INDIA-APK
+      path: ${{ env.PROJECT_DIR }}/android/app/build/outputs/apk/debug/app-debug.apk
+      if-no-files-found: error
