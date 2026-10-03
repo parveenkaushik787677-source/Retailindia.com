@@ -1,1 +1,59 @@
 
+name: Build RETAIL INDIA APK
+
+"on":
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Setup Android
+        uses: android-actions/setup-android@v3
+
+      - name: Extract project
+        run: unzip -q RETAIL-INDIA-GITHUB-UPLOAD.zip
+
+      - name: Install dependencies
+        working-directory: retail-india-production
+        run: npm install
+
+      - name: Build web app
+        working-directory: retail-india-production
+        run: npm run build
+
+      - name: Add Android
+        working-directory: retail-india-production
+        run: npx cap add android
+
+      - name: Sync Android
+        working-directory: retail-india-production
+        run: npx cap sync android
+
+      - name: Build APK
+        working-directory: retail-india-production/android
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleDebug
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: RETAIL-INDIA-APK
+          path: retail-india-production/android/app/build/outputs/apk/debug/app-debug.apk
+
